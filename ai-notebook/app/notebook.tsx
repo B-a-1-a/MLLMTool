@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,39 +11,51 @@ import { AddSourceDialog } from "../components/add-source-dialog"
 import { useLanguage } from "../contexts/language-context"
 import type { AudioSource } from "../types/audio";
 import { fetchLLMResponse } from "@/lib/groqApi"; 
+import { RecordSourceDialog } from "@/components/record-source-dialog"
 
 const INITIAL_SOURCES: AudioSource[] = [
   { id: "1", title: "Interview #1", type: "audio", duration: "12:34", path: "/audio1.mp3" },
-  { id: "2", title: "Meeting Notes", type: "transcript", path: "/transcript1.txt" },
-]
-
-const SAMPLE_SUMMARY = {
-  text: {
-    en: "This is a discussion about artificial intelligence and its impact on modern society. The speakers explore various applications of AI in healthcare, education, and daily life.",
-    es: "Esta es una discusión sobre la inteligencia artificial y su impacto en la sociedad moderna. Los oradores exploran varias aplicaciones de la IA en la salud, la educación y la vida diaria.",
-  },
-}
-
-const SAMPLE_TRANSCRIPT = {
-  en: `[Speaker 1]: Hello and welcome to our discussion about AI.
-[Speaker 2]: Thank you for having me today.
-[Speaker 1]: Let's start by talking about recent developments...`,
-  es: `[Orador 1]: Hola y bienvenidos a nuestra discusión sobre IA.
-[Orador 2]: Gracias por invitarme hoy.
-[Orador 1]: Empecemos hablando sobre los desarrollos recientes...`,
-}
+  { id: "2", title: "Meeting Notes", type: "audio", duration: "05:20", path: "/audio2.mp3" },
+];
 
 export default function Notebook() {
   const [sources, setSources] = useState<AudioSource[]>(INITIAL_SOURCES);
   const [selectedSource, setSelectedSource] = useState<AudioSource | null>(null);
+  const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState<string | null>(null);
   const { language } = useLanguage();
 
+  // Dummy API call to fetch transcript and summary (Simulated delay)
+  const fetchTranscriptAndSummary = async (source: AudioSource) => {
+    setTranscript("Fetching transcript...");
+    setSummary("Generating summary...");
+
+    setTimeout(() => {
+      if (source.id === "1") {
+        setTranscript("[Speaker 1]: Welcome to the interview.\n[Speaker 2]: Thank you for having me.");
+        setSummary("This is an interview about recent advancements in artificial intelligence.");
+      } else {
+        setTranscript("[Speaker 1]: This meeting discusses project updates.\n[Speaker 2]: Let's review the progress.");
+        setSummary("This meeting covers progress updates on the latest project developments.");
+      }
+    }, 1500);
+  };
+
+  // Handle source selection
+  useEffect(() => {
+    if (selectedSource) {
+      setAudioPlayer(new Audio(selectedSource.path));
+      fetchTranscriptAndSummary(selectedSource);
+    }
+  }, [selectedSource]);
+
   const handleQuerySubmit = async () => {
     if (!query.trim()) return;
     
-    setResponse("Processing..."); // Show loading state
+    setResponse("Processing...");
 
     if (language === "en") {
       const result = await fetchLLMResponse(query);
@@ -55,11 +67,14 @@ export default function Notebook() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
+      
       {/* Left Sidebar */}
       <div className="w-80 border-r p-4">
         <div className="flex flex-col h-full">
           <h2 className="text-lg mb-4">Sources</h2>
           <AddSourceDialog onAddSource={(newSource) => setSources([...sources, newSource])} />
+          <RecordSourceDialog onAddSource={(newSource) => setSources([...sources, newSource])} />
+            
           <div className="space-y-2">
             {sources.map((source) => (
               <div
@@ -84,7 +99,7 @@ export default function Notebook() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content - Audio & Summary */}
       <div className="flex-1 flex flex-col">
         <header className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-4">
@@ -103,10 +118,22 @@ export default function Notebook() {
           <div className="max-w-4xl mx-auto space-y-6">
             {selectedSource ? (
               <Card className="p-6">
-                <h3 className="font-semibold mb-4">Summary</h3>
-                <p className="text-muted-foreground mb-4">{SAMPLE_SUMMARY.text[language]}</p>
-                <div className="space-y-4"></div>
-                <h3 className="font-semibold mb-4">Ask about this {selectedSource.type}</h3>
+                {/* Audio Player */}
+                <h3 className="font-semibold mb-4">Audio Playback</h3>
+                {audioPlayer ? (
+                  <audio controls src={selectedSource.path} className="w-full" />
+                ) : (
+                  <p className="text-muted-foreground">Select an audio source to play.</p>
+                )}
+
+                {/* Summary Section */}
+                <h3 className="font-semibold mt-6 mb-4">Summary</h3>
+                <p className="text-muted-foreground">
+                  {summary || "Generating summary..."}
+                </p>
+
+                {/* Query Section */}
+                <h3 className="font-semibold mt-6 mb-4">Ask about this Audio</h3>
                 <div className="relative">
                   <Input
                     value={query}
@@ -148,7 +175,9 @@ export default function Notebook() {
           <h2 className="text-lg mb-4">{language === "en" ? "Transcript" : "Transcripción"}</h2>
           <ScrollArea className="flex-1">
             {selectedSource ? (
-              <div className="space-y-4 whitespace-pre-wrap">{SAMPLE_TRANSCRIPT[language]}</div>
+              <div className="space-y-4 whitespace-pre-wrap text-muted-foreground">
+                {transcript || "Fetching transcript..."}
+              </div>
             ) : (
               <div className="text-muted-foreground">
                 {language === "en" ? "No source selected" : "Ninguna fuente seleccionada"}
@@ -158,6 +187,5 @@ export default function Notebook() {
         </div>
       </div>
     </div>
-  )
+  );
 }
-
