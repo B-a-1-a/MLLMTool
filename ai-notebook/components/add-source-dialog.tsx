@@ -85,6 +85,9 @@ export function AddSourceDialog({ onAddSource }: AddSourceDialogProps) {
             </div>
           )}
           <Button type="submit">Add Source</Button>
+
+          <Button type="submit">Do Recording</Button>
+
         </form>
       </DialogContent>
     </Dialog>
