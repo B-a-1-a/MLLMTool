@@ -5,6 +5,8 @@
 
 .env
 .env.local
+.next/
+
 
 # User-specific files
 *.rsuser

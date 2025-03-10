@@ -11,7 +11,7 @@ export async function fetchLLMResponse(prompt: string) {
             {
                 model: "llama-3.3-70b-versatile", // Ensure model name is correct
                 messages: [
-                    { role: "system", content: "You are an AI assistant." },
+                    { role: "system", content: "You are an AI assistant. Answer user questions" },
                     { role: "user", content: prompt }
                 ],
                 max_tokens: 500,
