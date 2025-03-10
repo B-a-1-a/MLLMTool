@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, send_from_directory, current_app
+from flask import request
 from flask_cors import CORS
 import wave
 import os
@@ -40,9 +41,6 @@ frames = []
 recording_active = False
 recording_thread = None
 
-@app.route("/")
-def homepage():
-    return send_from_directory("static", "index.html")
 
 def record_audio():
     global frames, recording_active, stream
@@ -52,6 +50,21 @@ def record_audio():
     while recording_active:
         data = stream.read(CHUNK, exception_on_overflow=False)
         frames.append(data)
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe_audio():
+    try:
+        #use the body of the request to get the audio file
+        audio_file = request.files['blobURL']
+
+        #save the audio file 
+
+        #transcribe the audio file
+        transcript = transcribe_groq(os.path.join(SAVE_DIRECTORY, audio_file.filename))
+
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/start-recording', methods=['GET'])
 def start_recording():
