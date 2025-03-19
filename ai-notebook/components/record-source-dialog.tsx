@@ -1,45 +1,41 @@
-"use client"
+"use client";
+import { useState, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Mic, StopCircle } from "lucide-react";
+import type { AudioSource } from "../types/audio";
+import { uploadAudio, saveMetadata, fetchLatestRecording } from "@/lib/audioUploader";
+import { transcribeAudio } from "@/lib/transcribe";
+import { summarizeTranscript } from "@/lib/summarize";
 
-import { useState, useRef } from "react"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, Mic, StopCircle } from "lucide-react"
-import type { AudioSource } from "../types/audio"
-
-interface RecordSourceDialogProps {
-  onAddSource: (source: AudioSource) => void
-}
-
-export function RecordSourceDialog({ onAddSource }: RecordSourceDialogProps) {
+export function RecordSourceDialog({ onAddSource }: { onAddSource: (source: AudioSource) => void }) {
   const [isRecording, setIsRecording] = useState(false);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<BlobPart[]>([]);
 
   const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream);
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
-        }
-      };
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.current.push(event.data);
+      }
+    };
 
-      mediaRecorder.onstop = () => {
-        const recordedBlob = new Blob(audioChunks.current, { type: "audio/wav" });
-        setAudioBlob(recordedBlob);
-        audioChunks.current = [];
-      };
+    mediaRecorder.onstop = () => {
+      const recordedBlob = new Blob(audioChunks.current, { type: "audio/wav" });
+      setAudioBlob(recordedBlob);
+      audioChunks.current = [];
+    };
 
-      mediaRecorder.start();
-      mediaRecorderRef.current = mediaRecorder;
-      setIsRecording(true);
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-    }
+    mediaRecorder.start();
+    mediaRecorderRef.current = mediaRecorder;
+    setIsRecording(true);
   };
 
   const stopRecording = () => {
@@ -49,28 +45,54 @@ export function RecordSourceDialog({ onAddSource }: RecordSourceDialogProps) {
     }
   };
 
-  const saveRecording = () => {
-    if (!audioBlob) return;
+  const saveRecording = async () => {
+    if (!audioBlob) {
+      alert("No audio recorded!");
+      return;
+    }
 
-    const audioURL = URL.createObjectURL(audioBlob);
+    const file = new File([audioBlob], `recording-${Date.now()}.wav`, { type: "audio/wav" });
+
+    // 🟢 Upload the file to Supabase
+    const filePath = await uploadAudio(file);
+    if (!filePath) {
+      alert("Failed to upload audio");
+      return;
+    }
+
+    // 🟢 Fetch the uploaded file URL
+    const recording = await fetchLatestRecording();
+    if (!recording) {
+      alert("Failed to retrieve recording URL");
+      return;
+    }
+
+    const fileUrl = recording.file_url;
+
+    // 🟢 Transcribe the uploaded file
+    const transcriptText = await transcribeAudio(fileUrl);
+    setTranscript(transcriptText);
+
+    // 🟢 Summarize the transcript
+    const summaryText = await summarizeTranscript(transcriptText);
+    setSummary(summaryText);
+
+    // 🟢 Save metadata (transcript & summary) in Supabase
+    await saveMetadata(filePath, file.name, transcriptText, summaryText);
+
     const newSource: AudioSource = {
       id: Date.now().toString(),
       title: `Recording ${new Date().toLocaleTimeString()}`,
       type: "audio",
-      duration: "Unknown", // Duration calculation can be added later
-      path: audioURL,
+      duration: "Unknown",
+      path: fileUrl,
     };
 
     onAddSource(newSource);
-
-    // Reset the component state after saving
-    setIsDialogOpen(false);
-    setAudioBlob(null);
-    setIsRecording(false);
   };
 
   return (
-    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+    <Dialog>
       <DialogTrigger asChild>
         <Button className="mt-2 w-full flex items-center gap-2">
           <Mic className="h-5 w-5" />
@@ -83,12 +105,12 @@ export function RecordSourceDialog({ onAddSource }: RecordSourceDialogProps) {
         </DialogHeader>
         <div className="flex flex-col items-center space-y-4">
           {isRecording ? (
-            <Button variant="destructive" onClick={stopRecording} className="flex items-center gap-2">
+            <Button variant="destructive" onClick={stopRecording}>
               <StopCircle className="h-5 w-5" />
               Stop Recording
             </Button>
           ) : (
-            <Button variant="default" onClick={startRecording} className="flex items-center gap-2">
+            <Button variant="default" onClick={startRecording}>
               <Mic className="h-5 w-5" />
               Start Recording
             </Button>
@@ -100,6 +122,20 @@ export function RecordSourceDialog({ onAddSource }: RecordSourceDialogProps) {
               <Button onClick={saveRecording} className="mt-2 w-full">
                 Save Recording
               </Button>
+            </div>
+          )}
+
+          {transcript && (
+            <div className="w-full mt-4">
+              <h3 className="text-lg font-bold">Transcript:</h3>
+              <p className="text-sm">{transcript}</p>
+            </div>
+          )}
+
+          {summary && (
+            <div className="w-full mt-4">
+              <h3 className="text-lg font-bold">Summary:</h3>
+              <p className="text-sm">{summary}</p>
             </div>
           )}
         </div>
