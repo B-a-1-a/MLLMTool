@@ -1,19 +1,19 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { FileText, Mic, Share, ChevronRight, Upload } from "lucide-react"
-import { SettingsDialog } from "../components/settings-dialog"
-import { useLanguage } from "../contexts/language-context"
-import type { AudioSource } from "../types/audio"
-import { fetchLLMResponse } from "@/lib/groqApi"
-import { RecordSourceDialog } from "@/components/record-source-dialog"
-import { transcribeAudio } from "@/lib/transcribe"
-import { summarizeTranscript } from "@/lib/summarize"
-import CustomPDFViewer from "@/components/CustomPDFViewer"
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { FileText, Mic, Share, ChevronRight, Upload } from "lucide-react";
+import { SettingsDialog } from "../components/settings-dialog";
+import { useLanguage } from "../contexts/language-context";
+import type { AudioSource } from "../types/audio";
+import { fetchLLMResponse } from "@/lib/groqApi";
+import { RecordSourceDialog } from "@/components/record-source-dialog";
+import { transcribeAudio } from "@/lib/transcribe";
+import { summarizeTranscript } from "@/lib/summarize";
+import CustomPDFViewer from "@/components/CustomPDFViewer";
 import {
   Dialog,
   DialogContent,
@@ -22,8 +22,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { fetchLatestRecordings } from "@/lib/audioUploader";
+import { supabase } from "@/lib/supabaseClient";
 
 // Define interfaces for API response
 interface Highlight {
@@ -81,12 +83,9 @@ interface Source {
   duration?: string;
   path: string;
   file?: File;
+  transcript?: string;
+  summary?: string;
 }
-
-const INITIAL_SOURCES: Source[] = [
-  { id: "1", title: "Interview #1", type: "audio", duration: "12:34", path: "/audio1.mp3" },
-  { id: "2", title: "Meeting Notes", type: "audio", duration: "05:20", path: "/audio2.mp3" },
-];
 
 // Interface to store cached data for each source
 interface SourceCache {
@@ -98,7 +97,7 @@ interface SourceCache {
 }
 
 const Notebook = () => {
-  const [sources, setSources] = useState<Source[]>(INITIAL_SOURCES);
+  const [sources, setSources] = useState<Source[]>([]); // Initialize with an empty array
   const [selectedSource, setSelectedSource] = useState<Source | null>(null);
   const [audioPlayer, setAudioPlayer] = useState<HTMLAudioElement | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -114,6 +113,29 @@ const Notebook = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedSources, setProcessedSources] = useState<Set<string>>(new Set());
   const [sourceCache, setSourceCache] = useState<SourceCache>({});
+
+  // Fetch recordings when the component mounts
+  useEffect(() => {
+    fetchRecordings();
+  }, []);
+
+  // Fetch recordings from Supabase
+  const fetchRecordings = async () => {
+    const recordings = await fetchLatestRecordings();
+    if (recordings) {
+      // Map the recordings to match the Source type
+      const formattedRecordings = recordings.map((recording) => ({
+        id: recording.id,
+        title: recording.title,
+        type: recording.type,
+        duration: recording.duration,
+        path: recording.file_url, // Map file_url to path
+        transcript: recording.transcript,
+        summary: recording.summary,
+      }));
+      setSources(formattedRecordings);
+    }
+  };
 
   // Add a function to get text content from PDF viewer and cache it
   const setPDFTextContent = (content: string) => {
@@ -316,11 +338,11 @@ const Notebook = () => {
 
   const handleQuerySubmit = async () => {
     if (!query.trim() || !selectedSource) return;
-    
+  
     setResponse("Processing...");
     setIsProcessing(true);
     setHighlights([]);
-    
+  
     try {
       // Check language
       if (language !== "en") {
@@ -328,7 +350,7 @@ const Notebook = () => {
         setIsProcessing(false);
         return;
       }
-      
+  
       // Get context based on source type
       let context = "";
       if (selectedSource.type === "audio") {
@@ -336,40 +358,48 @@ const Notebook = () => {
       } else if (selectedSource.type === "pdf") {
         context = textContent || "";
       }
-      
+  
       if (!context) {
         setResponse("Unable to extract content from the selected source.");
         setIsProcessing(false);
         return;
       }
-      
+  
       // Call Groq LLM API with context (independent of backend API)
       const llmPromise = fetchLLMResponse(`Question: ${query}\n\nContext from ${selectedSource.type}: ${context.substring(0, 2000)}...`);
-      
+  
       let fullResponse = "";
-      let apiResponse = null;
-      
+      let apiResponse: QueryResponse | null = null;
+  
       // Try to get the backend API response, but continue even if it fails
       try {
         apiResponse = await queryBackend(query, context);
         fullResponse = apiResponse.answer;
-        
+  
         // Store highlights for potential visualization
-        if (apiResponse.highlights && apiResponse.highlights.length > 0) {
+        if (apiResponse && apiResponse.highlights && apiResponse.highlights.length > 0) {
           setHighlights(apiResponse.highlights);
-          
+  
           // Only add highlights to response if they're different from the main answer
-          if (apiResponse.merged_highlights && apiResponse.merged_highlights.length > 0) {
-            // Filter out any highlights that are identical to the main answer
-            const uniqueHighlights = apiResponse.merged_highlights.filter(h => 
-              h.text.trim() !== apiResponse.answer.trim()
-            );
-            
-            if (uniqueHighlights.length > 0) {
-              const highlightTexts = uniqueHighlights.map(h => 
-                `· ${h.text} (confidence: ${Math.min((h.avg_score * 100), 99).toFixed(0)}%)`
+          if (apiResponse && apiResponse.highlights && apiResponse.highlights.length > 0) {
+            setHighlights(apiResponse.highlights);
+          
+            // Only add highlights to response if they're different from the main answer
+            if (apiResponse.merged_highlights && apiResponse.merged_highlights.length > 0) {
+              // Store apiResponse.answer in a variable to avoid null issues
+              const answer = apiResponse.answer;
+          
+              // Filter out any highlights that are identical to the main answer
+              const uniqueHighlights = apiResponse.merged_highlights.filter(h => 
+                h.text.trim() !== answer.trim()
               );
-              fullResponse += `\n\nRelevant passages:\n${highlightTexts.join('\n\n')}`;
+          
+              if (uniqueHighlights.length > 0) {
+                const highlightTexts = uniqueHighlights.map(h => 
+                  `· ${h.text} (confidence: ${Math.min((h.avg_score * 100), 99).toFixed(0)}%)`
+                );
+                fullResponse += `\n\nRelevant passages:\n${highlightTexts.join('\n\n')}`;
+              }
             }
           }
         }
@@ -377,7 +407,7 @@ const Notebook = () => {
         console.error('Backend API error:', backendError);
         fullResponse = "Error retrieving information from the backend API. ";
       }
-      
+  
       // Wait for LLM response and add it to the full response
       try {
         const llmResponse = await llmPromise;
@@ -387,7 +417,7 @@ const Notebook = () => {
         console.error('LLM API error:', llmError);
         fullResponse += `\n\nChatbot Response:\nUnable to retrieve response from the language model.`;
       }
-      
+  
       setResponse(fullResponse);
     } catch (error) {
       console.error('Query submission error:', error);
